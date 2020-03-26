@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        #mapa {
+            height: 675px;
+        }
+    </style>
+    <title>Vizinho Amigo</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css" integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabulator/4.4.3/css/tabulator.min.css">
+</head>
+<body>
+    <div class="container-fluid">
+        <h1><img src="logo.png" width="150"> Buscador do Vizinho Amigo</h1>
+
+        <div class="row">
+            <div class="col col-sm-6">
+                <p><b>Quero Ajudar :)</b></p>
+                <div id="queroAjudar" style="border: 2px solid black !important;"></div>
+                <p><span id="queroAjudarCount">0</span> registros de <span id="queroAjudarTotal">...</span> (Apenas os 100 primeiros serão mostrados no mapa)</p>
+
+                <br/>
+
+                <p>
+                    <b>Preciso de uma Ajuda o/</b>
+                    &nbsp;&nbsp;
+                    <button id="darMatch" disabled>Dar Match</button>
+                </p>
+
+                <div id="precisoAjuda" style="border: 2px solid black !important;"></div>
+                <p><span id="precisoAjudaCount">0</span> registros de <span id="precisoAjudaTotal">...</span> (Apenas os 100 primeiros serão mostrados no mapa)</p>
+
+            </div>
+            <div class="col col-sm-6">
+                <p>
+                    <b>Localização</b> 
+                    <button id="atualizarMapa">Atualizar</button> 
+                    <button id="ocultarResolvidos">Ocultar Resolvidos</button>
+                    <b>Raio de Busca (km):</b> <input type="number" id="raioDeBusca" value=2>
+                </p>
+
+                <div id="mapa" style="border: 2px solid black !important;"></div>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDcS9joXlxPwihF48NHjxF36gkqG30Vt5M"></script>
+    <script src="bundle.js"></script>
+</body>
+</html>
