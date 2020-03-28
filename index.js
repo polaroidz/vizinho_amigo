@@ -1,5 +1,5 @@
 const { GoogleSpreadsheet } = require('google-spreadsheet');
-var Tabulator = require('tabulator-tables');
+const Tabulator = require('tabulator-tables');
 
 const API_KEY = "AIzaSyDcS9joXlxPwihF48NHjxF36gkqG30Vt5M";
 const SPREADSHEET_ID = "1kLg3peWbcvJjdKmI1vfzQ_JlFJS1nqclfQBO8nCKBOo";
@@ -10,6 +10,8 @@ const EMBAIXADOR = "Embaixador";
 
 const GEOCODER_BATCH_SIZE = 10;
 const GEOCODER_RATE_LIMIT = 10; // 0.1s
+
+const MAX_ITEMS_ON_MAP = 200;
 
 const ESTADOS = {
     "AC": "Acre",
@@ -54,11 +56,36 @@ let gOcultarResolvidos = false;
 let gVoluntariosMapData = [];
 let gPrecisoAjudaMapData = [];
 
-let gQueroAjudarTotal = document.getElementById("queroAjudarTotal");
-let gPrecisoAjudaTotal = document.getElementById("precisoAjudaTotal");
+let gQueroAjudarData = [];
+let gPrecisoAjudaData = [];
 
-let gQueroAjudarCount = document.getElementById("queroAjudarCount");
-let gPrecisoAjudaCount = document.getElementById("precisoAjudaCount");
+let gQueroAjudarTable = null;
+let gPrecisoAjudaTable = null;
+
+const gQueroAjudarTotal = document.getElementById("queroAjudarTotal");
+const gPrecisoAjudaTotal = document.getElementById("precisoAjudaTotal");
+
+const gQueroAjudarCount = document.getElementById("queroAjudarCount");
+const gPrecisoAjudaCount = document.getElementById("precisoAjudaCount");
+
+const gAtualizarMapaBtn = document.getElementById("atualizarMapa");
+const gOcultarResolvidosBtn = document.getElementById("ocultarResolvidos");
+const gLimparFiltrosBtn = document.getElementById("limparFiltros");
+
+const gRaioDeBusca = document.getElementById("raioDeBusca");
+const gRadiusCircle = new google.maps.Circle({
+    fillOpacity: 0,
+    strokeColor: '#000000',
+    strokeOpacity: 1,
+    strokeWeight: 3,
+    center: location,
+    map: null,
+    zIndex: 0,
+    radius: gRaioDeBusca.value * 1000
+});
+
+let gLocationRequestCount = 0;
+let gLocationRequestTotal = 0;
 
 /*================================================================*/
 
@@ -72,6 +99,17 @@ function requestGeocoderAddress(address, cb) {
     geocoder.geocode({ address }, function(results, status) {
         if (status === 'OK') {
             const { location } = results[0].geometry;
+
+            gLocationRequestCount += 1;
+
+            if (gLocationRequestCount >= gLocationRequestTotal) {
+                gAtualizarMapaBtn.disabled = false;
+                gAtualizarMapaBtn.innerText = "Atualizar Mapa";
+            } else {
+                const text = gLocationRequestCount + "/" + gLocationRequestTotal;
+                gAtualizarMapaBtn.innerText = "Atualizando mapa (" + text + ")...";
+            }
+
             cb(location);
         } else {
             setTimeout(() => requestGeocoderAddress(address, cb), GEOCODER_RATE_LIMIT);
@@ -88,6 +126,27 @@ function callGeocoderAPI(address, count, cb) {
     } else {
         requestGeocoderAddress(address, cb);
     }
+}
+
+function toRadians(degrees) {
+    return degrees * (Math.PI / 180);
+}
+
+const R = 6371e3;
+function calcDistance(lat1, lon1, lat2, lon2) {
+    const φ1 = toRadians(lat1);
+    const φ2 = toRadians(lat2);
+    const Δφ = toRadians(lat2 - lat1);
+    const Δλ = toRadians(lon2 - lon1);
+    
+    const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+            Math.cos(φ1) * Math.cos(φ2) *
+            Math.sin(Δλ/2) * Math.sin(Δλ/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    
+    const d = R * c;
+
+    return d / 1000;
 }
 
 
@@ -119,7 +178,7 @@ async function getDataFromSheet(sheet) {
 
     console.log(Object.getOwnPropertyNames(rows[0]))
 
-    let id = 1;
+    let id = 0;
     for (let i = 0; i < rows.length; i += 1) {
         rows[i]["_id"] = id++;
     }
@@ -129,7 +188,7 @@ async function getDataFromSheet(sheet) {
 
 let hasPopulatedPrecisoAjudaTable = false;
 async function populatePrecisoAjudaTable(data) {
-    const tabulator = new Tabulator("#precisoAjuda", {
+    gPrecisoAjudaTable = new Tabulator("#precisoAjuda", {
         data,
         layout:"fitDataFill",
         movableColumns:true,
@@ -206,7 +265,7 @@ async function populatePrecisoAjudaTable(data) {
 }
 
 async function populateQueroAjudarTable(data) {
-    const tabulator = new Tabulator("#queroAjudar", {
+    gQueroAjudarTable = new Tabulator("#queroAjudar", {
         data,
         layout:"fitDataFill",
         movableColumns:true,
@@ -266,7 +325,7 @@ async function populateQueroAjudarTable(data) {
         dataFiltered:function(filters, rows){
             gQueroAjudarCount.innerText = rows.length;
 
-            const slice = rows.slice(0, 100);
+            const slice = rows.slice(0, MAX_ITEMS_ON_MAP);
             const data = slice.map(row => row.getData());
 
             //showVoluntariosCircles(data);
@@ -283,11 +342,13 @@ function getVoluntarioCircleTitle(voluntario) {
     const telefone = voluntario["Telefone para contato:"];
     const email = voluntario["E-mail para contato:"];
     const bairro = voluntario["Bairro:"];
+    const info = voluntario["Compartilhe conosco informações importantes (opcional):"];
 
     return "Nome: " + nome  
         +  "\nTelefone: " + telefone 
         + "\nEmail: " + email
-        +  "\nBairro: " + bairro;
+        +  "\nBairro: " + bairro
+        + "\nInformações: " + info;
 }
 
 function addVoluntarioCircleFromAddress(voluntario, count, address) {
@@ -306,6 +367,7 @@ function addVoluntarioCircleFromAddress(voluntario, count, address) {
                 animation: google.maps.Animation.DROP,
                 map: gMap,
                 title,
+                zIndex: 1,
                 radius: calcCircleRadius()
             });
         } else {
@@ -319,6 +381,7 @@ function addVoluntarioCircleFromAddress(voluntario, count, address) {
                 animation: google.maps.Animation.DROP,
                 map: gMap,
                 title,
+                zIndex: 1,
                 radius: calcCircleRadius()
             });
         }
@@ -344,6 +407,9 @@ function showVoluntariosCircles(voluntarios) {
             gVoluntariosCircles[voluntario["_id"]].setMap(gMap);
         } else {
             const address = resolveAddressQueroAjudar(voluntario);
+
+            gLocationRequestTotal += 1;
+
             addVoluntarioCircleFromAddress(voluntario, count++, address);
         }
     }
@@ -357,18 +423,80 @@ function getPrecisoAjudaCircleTitle(voluntario) {
     const telefone = voluntario["Telefone para contato (Com Whatsapp, de preferência):"];
     const email = voluntario["E-mail para contato:"];
     const bairro = voluntario["Bairro:"];
+    const porque = voluntario["Por que eu preciso de ajuda?"];
+    const praque = voluntario["Você precisa de ajuda para quê?"];
+    const detalhe = voluntario["Descreva detalhadamente o seu pedido:"];
 
-    const message = "Clique em OK para buscar voluntários dentro do raio especificado";
+    const message = "Clique em OK para mostrar o raio especificado";
 
     return "Nome: " + nome  
         +  "\nTelefone: " + telefone 
         + "\nEmail: " + email
         +  "\nBairro: " + bairro
+        + "\nPor que?: " + porque
+        + "\nPra que?: " + praque
+        + "\nDetalhamento: " + detalhe
         + "\n\n" + message;
 }
 
 function handlePrecisoAjudaSelecinado(precisoAjuda) {
-    console.log(precisoAjuda);
+    const data = [precisoAjuda];
+
+    gPrecisoAjudaTable.replaceData(data);
+    clearPrecisoAjudaCircles();
+    showPrecisoAjudaCircles(data);
+    
+    const circle1 = gPrecisoAjudaCircles[precisoAjuda["_id"]];
+    const center1 = circle1.getCenter();
+
+    gRadiusCircle.setCenter(center1);
+    gRadiusCircle.setRadius(gRaioDeBusca.value * 1000);
+    gRadiusCircle.setMap(gMap);
+
+    const lat1 = center1.lat();
+    const lng1 = center1.lng();
+
+    let voluntarios = [];
+
+    for (const _id in gVoluntariosCircles) {
+        const circle2 = gVoluntariosCircles[_id];
+        const center2 = circle2.getCenter();
+        
+        const lat2 = center2.lat();
+        const lng2 = center2.lng();
+
+        const distance = calcDistance(lat1, lng1, lat2, lng2);
+
+        if (distance <= gRaioDeBusca.value) {
+            for(const voluntario of gVoluntariosMapData) {
+                if (voluntario["_id"] == _id) {
+                    voluntarios.push(voluntario)
+                    break;
+                }
+            }
+        }
+    }
+
+    gQueroAjudarTable.replaceData(voluntarios);
+    clearVoluntariosCircles();
+    showVoluntariosCircles(voluntarios);
+
+    gLimparFiltrosBtn.disabled = false;
+}
+
+function handleLimparFiltrosClick() {
+    gLimparFiltrosBtn.disabled = true;
+
+    gQueroAjudarTable.replaceData(gQueroAjudarData);
+    gPrecisoAjudaTable.replaceData(gPrecisoAjudaData);
+
+    gRadiusCircle.setMap(null);
+
+    clearVoluntariosCircles();
+    clearPrecisoAjudaCircles();
+
+    showVoluntariosCircles(gVoluntariosMapData);
+    showPrecisoAjudaCircles(gPrecisoAjudaMapData);
 }
 
 function addPrecisoAjudaCircleFromAddress(precisoAjuda, count, address) {
@@ -384,6 +512,7 @@ function addPrecisoAjudaCircleFromAddress(precisoAjuda, count, address) {
             fillOpacity: 0.35,
             center: location,
             map: gMap,
+            zIndex: 1,
             title,
             radius: calcCircleRadius()
         });            
@@ -413,6 +542,9 @@ function showPrecisoAjudaCircles(precisoAjudas) {
             gPrecisoAjudaCircles[precisoAjuda["_id"]].setMap(gMap);
         } else {
             const address = resolveAddressPrecisoAjuda(precisoAjuda);
+
+            gLocationRequestTotal += 1;
+
             addPrecisoAjudaCircleFromAddress(precisoAjuda, count++, address);
         }
     }
@@ -499,10 +631,17 @@ function handleAtualizarMapaClick() {
     clearVoluntariosCircles();
     clearPrecisoAjudaCircles();
 
+    gRadiusCircle.setMap(null);
+
+    gLocationRequestCount = 0;
+    gLocationRequestTotal = 0;
+
     showVoluntariosCircles(gVoluntariosMapData);
     showPrecisoAjudaCircles(gPrecisoAjudaMapData);
-
-    gOcultarResolvidos = true;
+    
+    gOcultarResolvidos = false;
+    gAtualizarMapaBtn.disabled = true;
+    gAtualizarMapaBtn.innerText = "Atualizando mapa...";    
 }
 
 function ocultarResolvidos() {
@@ -550,20 +689,19 @@ async function start() {
     const precisoAjudaSheet = getWorksheet(doc, PRECISO_DE_AJUDA);
     //const embaixadorSheet = getWorksheet(doc, EMBAIXADOR);
 
-    const queroAjudar = await getDataFromSheet(queroAjudarSheet);
-    const precisoAjuda = await getDataFromSheet(precisoAjudaSheet);
+    gQueroAjudarData = await getDataFromSheet(queroAjudarSheet);
+    gPrecisoAjudaData = await getDataFromSheet(precisoAjudaSheet);
 
-    gQueroAjudarTotal.innerText = queroAjudar.length;
-    gPrecisoAjudaTotal.innerText = precisoAjuda.length;
+    gQueroAjudarTotal.innerText = gQueroAjudarData.length;
+    gPrecisoAjudaTotal.innerText = gPrecisoAjudaData.length;
 
-    await populateQueroAjudarTable(queroAjudar);
-    await populatePrecisoAjudaTable(precisoAjuda);
+    await populateQueroAjudarTable(gQueroAjudarData);
+    await populatePrecisoAjudaTable(gPrecisoAjudaData);
 
-    const atualizarMapaBtn = document.getElementById("atualizarMapa");
-    const ocultarResolvidosBtn = document.getElementById("ocultarResolvidos");
+    gAtualizarMapaBtn.addEventListener('click', handleAtualizarMapaClick);
+    gOcultarResolvidosBtn.addEventListener('click', handleOcultarResolvidosClick);
 
-    atualizarMapaBtn.addEventListener('click', handleAtualizarMapaClick);
-    ocultarResolvidosBtn.addEventListener('click', handleOcultarResolvidosClick);
+    gLimparFiltrosBtn.addEventListener('click', handleLimparFiltrosClick);
 }
 
 function calcCircleRadius() {
